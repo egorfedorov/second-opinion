@@ -1,0 +1,16 @@
+{
+  "name": "second-opinion",
+  "version": "0.1.0",
+  "description": "A Claude Code plugin: Haiku reviews every turn's code changes in the background and pins a one-line verdict under the prompt.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Egor Fedorov",
+  "repository": "https://github.com/egorfedorov/second-opinion",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test tests/core.test.js",
+    "test:engine": "claude plugin test .",
+    "validate": "claude plugin validate ."
+  }
+}

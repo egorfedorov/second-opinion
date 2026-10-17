@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Second Opinion — every Claude Code turn gets a second look</title>
+<meta name="description" content="A Claude Code plugin: after every turn that changed code, Haiku 5.5 reviews the diff in the background and pins a one-line verdict under the prompt. About a tenth of a cent per review.">
+<meta property="og:title" content="Second Opinion — every Claude Code turn gets a second look">
+<meta property="og:description" content="Haiku reviews every turn's diff in the background: ✓ when nothing broke, ⚠ when something did, one click to hand it to Claude.">
+<meta property="og:type" content="website">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23111418'/><circle cx='13' cy='14' r='6' fill='none' stroke='%232dd4bf' stroke-width='3'/><path d='M17.5 18.5 24 25' stroke='%232dd4bf' stroke-width='3' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    --bg: #0b0d10;
+    --surface: #12161b;
+    --surface-2: #171c22;
+    --border: #232a33;
+    --text: #e8ebef;
+    --dim: #9aa3ae;
+    --faint: #6b7480;
+    --accent: #2dd4bf;
+    --accent-ink: #04211d;
+    --green: #3dd68c;
+    --blue: #6cb6ff;
+    --red: #ff7b72;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafaf7;
+      --surface: #ffffff;
+      --surface-2: #f3f3ef;
+      --border: #e3e4df;
+      --text: #121417;
+      --dim: #555e69;
+      --faint: #858c95;
+      --accent: #0f766e;
+      --accent-ink: #ffffff;
+      --green: #0d8a52;
+      --blue: #1f6feb;
+      --red: #cf3a32;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  code, pre, .mono { font-family: var(--mono); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+  @media (min-width: 640px) { .wrap { padding: 0 24px; } }
+
+  /* nav */
+  nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px);
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        border-bottom: 1px solid var(--border); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -0.01em; }
+  .brand svg { flex: none; }
+  .nav-links { display: flex; gap: 22px; font-size: 0.9rem; color: var(--dim); }
+  .nav-links a { text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-links .gh { color: var(--text); }
+  @media (max-width: 720px) { .nav-links a:not(.gh) { display: none; } }
+
+  /* hero */
+  .hero { padding: 72px 0 56px; }
+  .hero-grid { display: grid; gap: 48px; align-items: center; }
+  @media (min-width: 900px) { .hero-grid { grid-template-columns: 1.05fr 0.95fr; } }
+  .eyebrow { display: inline-flex; gap: 8px; align-items: center; font: 500 0.78rem/1 var(--mono);
+             color: var(--dim); border: 1px solid var(--border); border-radius: 999px; padding: 7px 12px; }
+  .eyebrow b { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  @media (max-width: 520px) { .eyebrow { flex-wrap: wrap; row-gap: 4px; border-radius: 12px; } }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.5rem); line-height: 1.06; letter-spacing: -0.035em;
+       margin: 22px 0 20px; font-weight: 750; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { color: var(--dim); font-size: 1.12rem; max-width: 34em; }
+  .lede strong { color: var(--text); font-weight: 600; }
+  .meter-line { margin: 18px 0 0; padding: 10px 14px; font: 500 0.8rem/1.4 var(--mono); color: var(--dim);
+                background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                white-space: pre; overflow-x: auto; max-width: 100%; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.95rem;
+         padding: 12px 18px; border-radius: 10px; text-decoration: none; border: 1px solid var(--border);
+         background: var(--surface); transition: border-color .15s, transform .15s; }
+  .btn:hover { border-color: var(--faint); transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+  /* receipt card */
+  .receipt { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+             padding: 22px; font-family: var(--mono); font-size: 0.84rem; box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
+  .receipt-head { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; color: var(--faint); font-size: 0.72rem;
+                  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+  .total { font-size: 2.3rem; font-weight: 700; letter-spacing: -0.03em; font-family: var(--sans); }
+  .total small { font-size: 0.9rem; color: var(--dim); font-weight: 500; margin-left: 6px; letter-spacing: 0; }
+  .stack { display: flex; height: 14px; border-radius: 5px; overflow: hidden; margin: 16px 0 12px; gap: 2px; }
+  .stack span { display: block; }
+  .legend { display: grid; gap: 7px; }
+  .legend div { display: flex; justify-content: space-between; gap: 12px; color: var(--dim); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 8px; vertical-align: 0; }
+  .legend b { color: var(--text); font-weight: 600; }
+  .rule { border: 0; border-top: 1px dashed var(--border); margin: 16px 0; }
+  .receipt-foot { color: var(--faint); font-size: 0.74rem; line-height: 1.5; }
+
+  /* sections */
+  section { padding: 76px 0; border-top: 1px solid var(--border); }
+  .label { font: 600 0.74rem/1 var(--mono); color: var(--accent); letter-spacing: .1em; text-transform: uppercase; }
+  h2 { font-size: clamp(1.6rem, 3.4vw, 2.35rem); line-height: 1.15; letter-spacing: -0.025em; margin: 14px 0 14px; font-weight: 720; }
+  .sub { color: var(--dim); font-size: 1.05rem; max-width: 40em; }
+  .grid-3 { display: grid; gap: 16px; margin-top: 36px; }
+  @media (min-width: 760px) { .grid-3 { grid-template-columns: repeat(3, 1fr); } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .stat { font: 700 2.2rem/1 var(--sans); letter-spacing: -0.03em; }
+  .stat.green { color: var(--green); } .stat.accent { color: var(--accent); } .stat.blue { color: var(--blue); }
+  .card h3 { font-size: 1rem; margin: 12px 0 6px; letter-spacing: -0.01em; }
+  .card p { color: var(--dim); font-size: 0.93rem; }
+
+  /* orchestrator */
+  .orch { display: grid; gap: 28px; margin-top: 40px; align-items: start; }
+  @media (min-width: 900px) { .orch { grid-template-columns: 1.1fr 0.9fr; } }
+  .flow { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .node { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface-2); }
+  .node .name { font-family: var(--mono); font-weight: 600; font-size: 0.9rem; }
+  .node .meta { color: var(--dim); font-size: 0.85rem; margin-top: 4px; }
+  .node.main { border-color: color-mix(in srgb, var(--blue) 55%, var(--border)); }
+  .node.main .name { color: var(--blue); }
+  .node.sub { border-color: color-mix(in srgb, var(--green) 55%, var(--border)); }
+  .node.sub .name { color: var(--green); }
+  .tag { float: right; font: 600 0.72rem/1 var(--mono); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--dim); }
+  .arrows { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+  .arrow { font: 0.76rem/1.4 var(--mono); color: var(--faint); text-align: center; padding: 6px 0; }
+  .arrow::before { content: ""; display: block; height: 18px; width: 1px; background: var(--border); margin: 0 auto 6px; }
+  .subs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .price { margin-top: 22px; }
+  .price-row { display: grid; grid-template-columns: 92px 1fr 64px; gap: 12px; align-items: center; font-size: 0.86rem; margin: 9px 0; }
+  .price-row .who { font-family: var(--mono); color: var(--dim); }
+  .price-row .val { font-family: var(--mono); text-align: right; }
+  .bar { height: 10px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: 3px; }
+  .points { display: grid; gap: 14px; }
+  .point { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
+  .point .n { font: 600 0.78rem/28px var(--mono); width: 28px; height: 28px; text-align: center; border-radius: 8px;
+              background: var(--surface); border: 1px solid var(--border); color: var(--accent); }
+  .point h3 { font-size: 0.98rem; margin-top: 3px; }
+  .point p { color: var(--dim); font-size: 0.92rem; margin-top: 2px; }
+  .proof { margin-top: 22px; font: 0.82rem/1.55 var(--mono); color: var(--dim); background: var(--surface);
+           border: 1px solid var(--border); border-left: 3px solid var(--green); border-radius: 8px; padding: 12px 14px; }
+  .proof b { color: var(--green); font-weight: 600; }
+
+  /* terminal */
+  .term { margin-top: 36px; background: #0a0c0f; color: #d7dce2; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  @media (prefers-color-scheme: light) { .term { background: #111418; border-color: #111418; } }
+  .term-bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid #1f252d; }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #2a313a; }
+  .term-bar span { margin-left: 8px; font: 0.76rem var(--mono); color: #7d8692; }
+  .term pre { padding: 18px 20px; overflow-x: auto; font-size: 0.8rem; line-height: 1.55; }
+  .t-h { color: #ffb224; } .t-g { color: #3dd68c; } .t-d { color: #7d8692; } .t-b { color: #e8ebef; font-weight: 600; }
+  .caption { color: var(--faint); font-size: 0.85rem; margin-top: 12px; }
+
+  /* features */
+  .features { display: grid; gap: 1px; margin-top: 36px; background: var(--border); border: 1px solid var(--border);
+              border-radius: var(--radius); overflow: hidden; }
+  @media (min-width: 640px) { .features { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 960px) { .features { grid-template-columns: repeat(3, 1fr); } }
+  .feature { background: var(--surface); padding: 22px; }
+  .feature code { font-size: 0.8rem; color: var(--accent); }
+  .feature h3 { font-size: 0.98rem; margin: 6px 0 6px; }
+  .feature p { color: var(--dim); font-size: 0.9rem; }
+
+  /* principles */
+  .principles { display: grid; gap: 12px; margin-top: 32px; }
+  @media (min-width: 760px) { .principles { grid-template-columns: 1fr 1fr; } }
+  .principle { display: flex; gap: 12px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .principle .ok { color: var(--green); font-weight: 700; }
+  .principle p { color: var(--dim); font-size: 0.92rem; }
+  .principle b { color: var(--text); }
+
+  /* install */
+  .install { display: grid; gap: 16px; margin-top: 32px; }
+  @media (min-width: 860px) { .install { grid-template-columns: 1fr 1fr; } }
+  /* Grid items default to min-width:auto; long <pre> lines would widen the page. */
+  .hero-grid > *, .orch > *, .install > * { min-width: 0; }
+  .code { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  .code .h { font: 600 0.74rem/1 var(--mono); color: var(--faint); padding: 12px 14px 0; text-transform: uppercase; letter-spacing: .08em; }
+  .code pre { padding: 10px 14px 14px; overflow-x: auto; font-size: 0.84rem; line-height: 1.7; }
+  .code pre .c { color: var(--faint); }
+  .copy { position: absolute; top: 8px; right: 8px; font: 600 0.72rem var(--mono); color: var(--dim); background: var(--surface-2);
+          border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+  .copy:hover { color: var(--text); }
+  .note { color: var(--dim); font-size: 0.9rem; margin-top: 16px; }
+
+  /* donate */
+  .donate { display: grid; gap: 10px; margin-top: 28px; max-width: 640px; }
+  .addr { display: flex; justify-content: space-between; align-items: center; gap: 12px; text-align: left; width: 100%;
+          background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; cursor: pointer;
+          color: var(--text); font: inherit; transition: border-color .15s; }
+  .addr:hover { border-color: var(--accent); }
+  .addr .coin { font-weight: 600; font-size: 0.85rem; }
+  .addr code { display: block; font-size: 0.76rem; color: var(--dim); word-break: break-all; margin-top: 3px; }
+  .addr .hint { color: var(--faint); font: 0.72rem var(--mono); white-space: nowrap; }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0 48px; color: var(--faint); font-size: 0.88rem; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+  footer nav { all: unset; display: flex; gap: 20px; flex-wrap: wrap; }
+  footer a { text-decoration: none; color: var(--dim); }
+  footer a:hover { color: var(--text); }
+
+  /* the band mock */
+  .shot { background: #0a0c0f; color: #d7dce2; border: 1px solid var(--border); border-radius: var(--radius);
+          overflow: hidden; font: 0.8rem/1.55 var(--mono); box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
+  @media (prefers-color-scheme: light) { .shot { background: #111418; border-color: #111418; } }
+  .shot .body { padding: 16px 18px; }
+  .shot .dim { color: #7d8692; }
+  .shot .warn { color: #ffb224; }
+  .shot .ok { color: #3dd68c; }
+  .shot .prompt { border-top: 1px solid #2a313a; border-bottom: 1px solid #2a313a; padding: 8px 18px; color: #e8ebef; }
+  .shot .status { padding: 8px 18px 12px; color: #ffb224; white-space: pre; overflow-x: auto; }
+  .shot .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .shot .kbtn { border: 1px solid #3a434e; border-radius: 6px; padding: 2px 8px; color: #e8ebef; }
+  .two { display: grid; gap: 16px; margin-top: 32px; }
+  @media (min-width: 760px) { .two { grid-template-columns: 1fr 1fr; } }
+  .list { list-style: none; display: grid; gap: 8px; margin-top: 10px; }
+  .list li { color: var(--dim); font-size: 0.93rem; padding-left: 22px; position: relative; }
+  .list li::before { position: absolute; left: 0; font-weight: 700; }
+  .list.yes li::before { content: "✓"; color: var(--accent); }
+  .list.no li::before { content: "–"; color: var(--faint); }
+  table.cost { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 0.92rem; }
+  table.cost th, table.cost td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  table.cost th { color: var(--faint); font: 600 0.74rem var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+  table.cost td:last-child { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .more { display: grid; gap: 12px; margin-top: 28px; }
+  @media (min-width: 760px) { .more { grid-template-columns: 1fr 1fr; } }
+  .more a { display: block; text-decoration: none; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px 18px; transition: border-color .15s; }
+  .more a:hover { border-color: var(--accent); }
+  .more b { display: block; }
+  .more span { color: var(--dim); font-size: 0.9rem; }
+  .hero-grid > *, .two > *, .more > * { min-width: 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor" opacity=".08"/><circle cx="13" cy="14" r="6" fill="none" stroke="var(--accent)" stroke-width="3"/><path d="M17.5 18.5 24 25" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/></svg>
+      second-opinion
+    </a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#flags">What it flags</a>
+      <a href="#cost">Cost</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/egorfedorov/second-opinion">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow"><b>v0.1.0 &middot;</b> Claude Code plugin &middot; MIT</span>
+      <h1>Every turn gets a <em>second look</em>.</h1>
+      <p class="lede">After each turn that changed code, <strong>Haiku&nbsp;5.5 reads the diff in the background</strong> and pins one line under your prompt: ✓ when nothing broke, ⚠ when something did. Details are one click away, and one more click hands them to Claude. About a tenth of a cent a review.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install the plugin</a>
+        <a class="btn" href="#how">How it works</a>
+      </div>
+    </div>
+
+    <div class="shot" role="img" aria-label="Claude Code with a Second Opinion warning band above the prompt and a status line under it">
+      <div class="body">
+        <div class="dim">● Done. Simplified login() and removed the redundant branch.</div>
+        <br>
+        <div><span class="warn">⚠ Second opinion:</span> removed the null check in src/auth.ts:41</div>
+        <div class="dim">&nbsp;&nbsp;- src/auth.ts:41 — user can be undefined here — restore the guard</div>
+        <div class="btn-row"><span class="kbtn">Hide</span><span class="kbtn">Ask Claude to fix</span><span class="kbtn">Dismiss</span></div>
+      </div>
+      <div class="prompt">&gt; <span class="dim">▌</span></div>
+      <div class="status">second-opinion: ⚠ removed the null check in src/auth.ts:41 · /second-opinion · $0.0009 so far</div>
+    </div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <div class="label">How it works</div>
+    <h2>You don't read every diff. It does.</h2>
+    <p class="sub">Coding agents are fast and confident, and the mistakes that slip through are the quiet ones: a guard deleted while "simplifying", an error swallowed, a function that now does something other than what you asked.</p>
+    <div class="grid-3">
+      <div class="card">
+        <div class="stat accent">1</div>
+        <h3>Claude edits</h3>
+        <p>Every successful Edit, Write and NotebookEdit in the turn is recorded, subagents' too, as the diff Claude Code itself produced, with line numbers.</p>
+      </div>
+      <div class="card">
+        <div class="stat accent">2</div>
+        <h3>Haiku reviews</h3>
+        <p>When the turn ends, the diff and your request go to Haiku&nbsp;5.5. It runs in the background; the next turn doesn't wait.</p>
+      </div>
+      <div class="card">
+        <div class="stat accent">3</div>
+        <h3>One line, then your call</h3>
+        <p>The verdict is pinned under the prompt. A warning opens a band with <b>Details</b>, <b>Ask Claude to fix</b> and <b>Dismiss</b>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="flags">
+  <div class="wrap">
+    <div class="label">What it flags</div>
+    <h2>Problems that hurt. Not opinions.</h2>
+    <p class="sub">The reviewer answers one question: did this change break something? It is told never to invent a problem, and a reply it can't parse never counts as a warning.</p>
+    <div class="two">
+      <div class="card">
+        <h3>Flags</h3>
+        <ul class="list yes">
+          <li>A removed check, guard or error handling</li>
+          <li>A bug the diff introduces</li>
+          <li>A broken contract with callers</li>
+          <li>A security hole or a committed secret</li>
+          <li>Data loss, leftover debug code</li>
+          <li>Logic that doesn't do what you asked</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Leaves alone</h3>
+        <ul class="list no">
+          <li>Style, naming, formatting</li>
+          <li>Missing tests</li>
+          <li>Anything the diff doesn't show</li>
+          <li>Matters of taste</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cost">
+  <div class="wrap">
+    <div class="label">Cost</div>
+    <h2>A hundred reviews for about ten cents.</h2>
+    <p class="sub">Haiku&nbsp;5.5 costs $0.10 per million input tokens and $0.50 per million output, about 40× less than Opus. The session's running total is in the line itself.</p>
+    <div class="table-wrap">
+      <table class="cost">
+        <tr><th>Turn</th><th>Diff sent</th><th>Review</th></tr>
+        <tr><td>A one-function fix</td><td>~2K tokens</td><td>~$0.0003</td></tr>
+        <tr><td>A typical feature turn</td><td>~6K tokens</td><td>~$0.0008</td></tr>
+        <tr><td>A big refactor (cut at 24K characters)</td><td>~8K tokens</td><td>~$0.001</td></tr>
+      </table>
+    </div>
+    <p class="note">Want a deeper pass? <code>/second-opinion model sonnet</code> reviews with Sonnet&nbsp;5.5 at about twenty times the price.</p>
+  </div>
+</section>
+
+<section id="commands">
+  <div class="wrap">
+    <div class="label">Commands</div>
+    <h2>Four words to remember.</h2>
+    <div class="features">
+      <div class="feature"><code>/second-opinion</code><h3>The last review</h3><p>Every finding with file and line, the model and what it cost.</p></div>
+      <div class="feature"><code>/second-opinion fix</code><h3>Hand it to Claude</h3><p>"Check whether it is real; fix it if so, say why not otherwise."</p></div>
+      <div class="feature"><code>/second-opinion off · on</code><h3>Pause and resume</h3><p>Remembered across sessions.</p></div>
+      <div class="feature"><code>/second-opinion model</code><h3>haiku or sonnet</h3><p>Cheap and quick, or careful.</p></div>
+      <div class="feature"><code>privacy</code><h3>Your own session</h3><p>The diff goes to Claude through your Claude Code session's own connection. Nothing else leaves the machine.</p></div>
+      <div class="feature"><code>no setup</code><h3>No keys, no Node</h3><p>It runs inside Claude Code. No API key, no Python, no config file.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="label">Install</div>
+    <h2>Two commands. Then restart Claude Code.</h2>
+    <div class="install">
+      <div class="code">
+        <div class="h">Install</div>
+        <button class="copy" data-copy="claude plugin marketplace add egorfedorov/second-opinion&#10;claude plugin install second-opinion@second-opinion">copy</button>
+<pre>claude plugin marketplace add egorfedorov/second-opinion
+claude plugin install second-opinion@second-opinion</pre>
+      </div>
+      <div class="code">
+        <div class="h">Then, any time</div>
+        <button class="copy" data-copy="/second-opinion">copy</button>
+<pre><span class="c"># after a turn that changed code</span>
+/second-opinion</pre>
+      </div>
+    </div>
+    <p class="note">Needs a Claude Code version with plugin mods; recent versions have them.</p>
+  </div>
+</section>
+
+<section id="more">
+  <div class="wrap">
+    <div class="label">More plugins</div>
+    <h2>From the same workbench.</h2>
+    <div class="more">
+      <a href="https://egorfedorov.github.io/claude-context-optimizer/"><b>context-optimizer</b><span>A live line with context, cost, plan limits and the cache countdown, and Haiku subagents for the reading.</span></a>
+      <a href="https://egorfedorov.github.io/project-brain/"><b>project-brain</b><span>A living project dossier in claude.ai chat, Cowork and Claude Code.</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>second-opinion &middot; MIT &middot; a cheap second pair of eyes</span>
+    <nav>
+      <a href="https://github.com/egorfedorov/second-opinion">GitHub</a>
+      <a href="https://github.com/egorfedorov/second-opinion/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/egorfedorov/second-opinion/issues">Issues</a>
+      <a href="https://github.com/egorfedorov/second-opinion/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll('[data-copy]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(el.dataset.copy);
+        el.textContent = 'copied';
+      } catch {
+        el.textContent = 'select & copy';
+      }
+      setTimeout(() => { el.textContent = 'copy'; }, 1500);
+    });
+  });
+</script>
+</body>
+</html>

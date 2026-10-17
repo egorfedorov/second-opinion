@@ -1,0 +1,16 @@
+{
+  "name": "second-opinion",
+  "owner": {
+    "name": "Egor Fedorov"
+  },
+  "metadata": {
+    "description": "Second Opinion: a background code review of every Claude Code turn, by a cheap model, with a one-line verdict under the prompt."
+  },
+  "plugins": [
+    {
+      "name": "second-opinion",
+      "source": "./",
+      "description": "After every Claude Code turn that changed code, Haiku 5.5 reviews the diff in the background and pins a one-line verdict under the prompt."
+    }
+  ]
+}
