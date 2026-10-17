@@ -7,8 +7,21 @@
     "name": "Egor Fedorov"
   },
   "repository": "https://github.com/egorfedorov/second-opinion",
-  "homepage": "https://github.com/egorfedorov/second-opinion#readme",
+  "homepage": "https://egorfedorov.github.io/second-opinion/",
   "license": "MIT",
-  "keywords": ["code review", "review", "diff", "haiku", "second opinion", "bugs", "claude code", "quality"],
-  "types": "./types/index.d.ts"
+  "keywords": [
+    "code review",
+    "review",
+    "diff",
+    "haiku",
+    "second opinion",
+    "bugs",
+    "claude code",
+    "quality"
+  ],
+  "types": "./types/index.d.ts",
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://github.com/egorfedorov/second-opinion#readme",
+  "supportUrl": "https://github.com/egorfedorov/second-opinion/issues",
+  "privacyPolicyUrl": "https://github.com/egorfedorov/second-opinion#privacy"
 }
